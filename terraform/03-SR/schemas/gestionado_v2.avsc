@@ -1,0 +1,10 @@
+{
+  "type": "record",
+  "name": "Usuario",
+  "namespace": "demo.esquemas",
+  "fields": [
+    {"name": "id",     "type": "long"},
+    {"name": "nombre", "type": "string"},
+    {"name": "email",  "type": ["null", "string"], "default": null}
+  ]
+}

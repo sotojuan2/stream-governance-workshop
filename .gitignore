@@ -1,0 +1,23 @@
+# Local build artifacts / caches
+/demo1/.m2/
+/demo1/readwrite-rules-app/target/
+
+# Ignore accidental local Maven home directory created under demo1/?
+/demo1/\?/
+
+# Temporary backups created during demos
+*.bak
+*.bak-*
+/demo1/readwrite-rules-app/src/main/resources/client.properties.*.bak
+
+# Terraform state (should never be committed)
+*.tfstate
+*.tfstate.*
+
+# Generated local env files (contain credentials)
+/terraform/.env
+/terraform/client.properties
+
+# OS / tooling
+.DS_Store
+.dotfiles.update
