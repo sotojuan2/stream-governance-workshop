@@ -33,7 +33,7 @@ printf '%s\n' \
 ```bash
 docker run --rm -i \
   -v "$TERRAFORM_CLIENT_PROPERTIES:/work/client.properties:ro" \
-  "$DEMO_KAFKA_TOOLS_IMAGE" \
+  "$DEMO_KAFKA_SERVER_IMAGE" \
   kafka-console-consumer \
     --bootstrap-server "$BOOTSTRAP_SERVER" \
     --consumer.config /work/client.properties \
@@ -55,7 +55,7 @@ docker run --rm -i \
 
 ![Infer Schema](assets/20260220_175211_Infer_Schema.png)
 
-7. Paste the sample schema from the [file](./06-flink/default_sceham.json).
+7. Paste the sample schema from the [file](./terraform/06-flink/default_sceham.json).
    
 
 ![Add Schema](assets/20260220_175520_Create_Data_Contracts.png)

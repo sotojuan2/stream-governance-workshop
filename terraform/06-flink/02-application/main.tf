@@ -71,94 +71,8 @@ data "confluent_kafka_cluster" "basic" {
 #   so that the JSON structure is available via Schema Registry.
 # - The 'confluent' connector maps Flink tables to Kafka topics in the selected Kafka cluster.
 #
-# Drop + create tables
-# Some early failed attempts may have created tables with incompatible schemas (e.g., [key BYTES, val BYTES]).
-# We drop them once to ensure the demo is reproducible.
-resource "confluent_flink_statement" "drop_adults_table" {
-  organization {
-    id = data.confluent_organization.main.id
-  }
-  environment {
-    id = local.environment_id
-  }
-  compute_pool {
-    id = local.flink_compute_pool_id
-  }
-  principal {
-    id = local.service_account_id
-  }
-
-  statement = "DROP TABLE IF EXISTS ${local.table_adults};"
-
-  properties = {
-    "sql.current-catalog"  = data.confluent_environment.demo.display_name
-    "sql.current-database" = data.confluent_kafka_cluster.basic.display_name
-  }
-
-  rest_endpoint = local.flink_rest_endpoint
-  credentials {
-    key    = local.flink_api_key_id
-    secret = local.flink_api_key_secret
-  }
-}
-
-resource "confluent_flink_statement" "drop_dlq_table" {
-  organization {
-    id = data.confluent_organization.main.id
-  }
-  environment {
-    id = local.environment_id
-  }
-  compute_pool {
-    id = local.flink_compute_pool_id
-  }
-  principal {
-    id = local.service_account_id
-  }
-
-  statement = "DROP TABLE IF EXISTS ${local.table_dlq};"
-
-  properties = {
-    "sql.current-catalog"  = data.confluent_environment.demo.display_name
-    "sql.current-database" = data.confluent_kafka_cluster.basic.display_name
-  }
-
-  rest_endpoint = local.flink_rest_endpoint
-  credentials {
-    key    = local.flink_api_key_id
-    secret = local.flink_api_key_secret
-  }
-}
-
-# (Commented out: DROP source table on initial run)
-# resource "confluent_flink_statement" "drop_source_table" {
-#   organization {
-#     id = data.confluent_organization.main.id
-#   }
-#   environment {
-#     id = local.environment_id
-#   }
-#   compute_pool {
-#     id = local.flink_compute_pool_id
-#   }
-#   principal {
-#     id = local.service_account_id
-#   }
-#
-#   statement = "DROP TABLE IF EXISTS ${local.table_source};"
-#
-#   properties = {
-#     "sql.current-catalog"  = data.confluent_environment.demo.display_name
-#     "sql.current-database" = data.confluent_kafka_cluster.basic.display_name
-#   }
-#
-#   rest_endpoint = local.flink_rest_endpoint
-#   credentials {
-#     key    = local.flink_api_key_id
-#     secret = local.flink_api_key_secret
-#   }
-# }
-
+# IMPORTANT: Do NOT use DROP TABLE in Confluent Cloud Flink SQL.
+# In CC, DROP TABLE deletes both the Flink catalog entry AND the underlying Kafka topic + data.
 # Source table (JSON via Schema Registry)
 resource "confluent_flink_statement" "create_source_table" {
   organization {
@@ -174,17 +88,16 @@ resource "confluent_flink_statement" "create_source_table" {
     id = local.service_account_id
   }
 
-  depends_on = [
-    confluent_flink_statement.drop_adults_table,
-    confluent_flink_statement.drop_dlq_table,
-  ]
 
+  # Column types MUST match the JSON Schema registered in SR for crm.user.noschema-value.
+  # Non-nullable strings match JSON Schema "type": "string" (required).
+  # Nullable fields match JSON Schema "type": ["null", ...].
   statement = <<SQL
 CREATE TABLE IF NOT EXISTS ${local.table_source} (
   `key` VARBINARY(2147483647),
-  `firstName` STRING,
-  `lastName` STRING,
-  `fullName` STRING,
+  `firstName` STRING NOT NULL,
+  `lastName` STRING NOT NULL,
+  `fullName` STRING NOT NULL,
   `age` DOUBLE,
   `id` DOUBLE,
   `nombre` STRING,
@@ -227,7 +140,7 @@ resource "confluent_flink_statement" "create_adults_table" {
     id = local.service_account_id
   }
 
-  depends_on = [confluent_flink_statement.drop_adults_table]
+  depends_on = [confluent_flink_statement.create_source_table]
 
   statement = <<SQL
 CREATE TABLE IF NOT EXISTS ${local.table_adults} (
@@ -275,7 +188,7 @@ resource "confluent_flink_statement" "create_dlq_table" {
     id = local.service_account_id
   }
 
-  depends_on = [confluent_flink_statement.drop_dlq_table]
+  depends_on = [confluent_flink_statement.create_source_table]
 
   statement = <<SQL
 CREATE TABLE IF NOT EXISTS ${local.table_dlq} (

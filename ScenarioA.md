@@ -31,7 +31,7 @@ USER_SCHEMA_V1="$(jq -c . "$SCHEMA_DIR/user.avsc")"
 printf '%s\n' \
   '{"firstName":"Ana2","lastName":"Lopez","fullName":"","age":28,"id":null,"nombre":null,"email":null,"edad":null}' \
   '{"firstName":"Bob2","lastName":"Smith","fullName":"","age":25,"id":null,"nombre":null,"email":null,"edad":null}' \
-  '{"firstName":"All2","lastName":"Li","fullName":"","age":16,"id":null,"nombre":null,"email":null,"edad":null}' | \
+  '{"firstName":"All2","lastName":"Lis","fullName":"","age":16,"id":null,"nombre":null,"email":null,"edad":null}' | \
   docker run --rm -i \
     -v "$TERRAFORM_CLIENT_PROPERTIES:/work/client.properties:ro" \
     "$DEMO_KAFKA_TOOLS_IMAGE" \
@@ -102,22 +102,46 @@ The managed topic is `BACKWARD`, so there is no assurance that consumers using a
 
 ### 5.1 Upgrade the managed Java consumer to v2 (reader schema)
 
-In this demo the Avro consumer runs with `specific.avro.reader=true` and uses the generated `User` class, so “upgrading the consumer” means updating `user.avsc` and rebuilding the jar.
+This topic is configured as `BACKWARD`. That means **Schema Registry guarantees that the new schema (v2) can read data written with the previous schema (v1)**.
+
+It does **not** guarantee that a consumer still running the old schema (v1) can read data produced with the new schema (v2). For that reason, the safe rollout order is:
+
+1. Upgrade consumers (reader schema) first.
+2. Upgrade producers / register the new writer schema afterwards.
+
+In this demo, the Avro consumer runs with `specific.avro.reader=true` and uses the generated `User` class. So “upgrading the consumer” means updating the local `user.avsc` used by the Java build, regenerating the Avro classes, and rebuilding the jar.
+
+#### Step 1: Stop the managed consumer
 
 ```bash
-# Stop the managed consumer (if it is running)
 docker rm -f unified-consumer-managed >/dev/null 2>&1 || true
+```
 
-# Backup v1 once, then switch the app schema to the v2-compatible variant (adds 'country' with a default)
-# (Keeping a stable backup makes it safer to run Scenario B afterwards.)
+#### Step 2: Backup the current (v1) schema once
+
+Keeping a stable backup makes it safer to run Scenario B afterwards.
+
+```bash
 if [[ ! -f "$SCHEMA_DIR/user.avsc.unified-demo.v1.bak" ]]; then
   cp "$SCHEMA_DIR/user.avsc" "$SCHEMA_DIR/user.avsc.unified-demo.v1.bak"
 fi
+```
 
+#### Step 3: Switch the app schema to the v2 *compatible* variant
+
+Here we use the v2 schema that **adds a new field with a default** (`country`).
+
+- Old records (written with v1) do not contain `country`.
+- When the v2 consumer reads them, Avro will use the **default** value.
+
+```bash
 cp "$ROOT_DIR/terraform/04-schema-evolution/schemas/user_v2_good_with_default.avsc" \
   "$SCHEMA_DIR/user.avsc"
+```
 
-# Rebuild the Java demo app 
+#### Step 4: Rebuild the Java demo app (regenerate SpecificRecord classes)
+
+```bash
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   -v "$ROOT_DIR/demo1:/workspace" \
@@ -126,9 +150,13 @@ docker run --rm \
   -w /workspace \
   "$DEMO1_MAVEN_IMAGE" \
   mvn -q -DskipTests package
+```
 
-  # Restart the managed consumer 
+#### Step 5: Restart the managed consumer
+
+```bash
 docker rm -f unified-consumer-managed >/dev/null 2>&1 || true
+
 docker run --rm -d \
   --name unified-consumer-managed \
   -e DEMO_TOPIC="crm.user.managed" \
@@ -138,29 +166,67 @@ docker run --rm -d \
   "$DEMO1_JAVA_IMAGE" \
   java -classpath target/readwrite-rules-app-1.0.0-SNAPSHOT-jar-with-dependencies.jar \
     com.tomasalmeida.data.contract.readwrite.UnifiedTopicConsumerRunner
+```
+
+#### Step 6: Follow the logs
+
+```bash
 docker logs -f unified-consumer-managed
 ```
 
-Note: this walkthrough sets `use.latest.version=true` in the consumer `client.properties` (see section 4.4), so upgrading the consumer first is required.
+Note: if your consumer configuration is set to resolve the latest schema version (for example via `use.latest.version=true`), upgrading the consumer first is required.
 
-### 5.2 Demonstrate failure
+### 5.2 Demonstrate failure (incompatible schema rejected by Schema Registry)
 
-The managed topic is `BACKWARD`, so adding a *new required field without a default* is incompatible.
+Now that the consumer has been upgraded, we try to evolve the **managed subject** via Terraform.
+
+`terraform/04-schema-evolution` selects the schema file based on `managed_schema_variant`:
+
+- `bad` → `terraform/04-schema-evolution/schemas/user_v2_bad_no_default.avsc`
+- `good` → `terraform/04-schema-evolution/schemas/user_v2_good_with_default.avsc`
+
+The `bad` variant adds a new field **without a default**, which breaks `BACKWARD` compatibility (v2 cannot read old v1 data). Schema Registry rejects this update server-side, so `terraform apply` fails.
 
 ```bash
 terraform -chdir=terraform/04-schema-evolution init
 terraform -chdir=terraform/04-schema-evolution apply -var managed_schema_variant=bad
 ```
 
-Expected: Terraform fails because SR rejects the incompatible schema.
+Expected:
 
-### 5.3 Demonstrate success
+- `terraform apply` fails during schema validation (the provider always validates during `apply`, even if `skip_validation_during_plan=true`).
+- The error originates from Schema Registry compatibility checks, but what you will see is a **Terraform error** similar to:
+
+```text
+Error: error validating Schema: error validating a schema: [
+  {errorType:'READER_FIELD_MISSING_DEFAULT_VALUE', description:'...missing default value...', additionalInfo:'country'}
+  {compatibility: 'BACKWARD'}
+]
+```
+
+What to look for:
+
+- `READER_FIELD_MISSING_DEFAULT_VALUE` means the new schema adds a field (here: `country`) that is **missing in the old schema and has no default**.
+- With `BACKWARD` compatibility this is rejected, because the new schema (reader) would not be able to read old data safely.
+
+In the full Terraform output you will also typically see:
+
+- The resource that failed (for example `confluent_schema.crm_user_managed_v2`).
+- The file and line number in Terraform where the resource is declared (for example `terraform/04-schema-evolution/main.tf:54`).
+- Extra fields such as `oldSchemaVersion` / `oldSchema`, which help you confirm what Schema Registry is comparing against.
+
+### 5.3 Demonstrate success (compatible schema accepted)
+
+The `good` variant adds the same field **with a default**, so v2 remains `BACKWARD` compatible with v1.
 
 ```bash
 terraform -chdir=terraform/04-schema-evolution apply -var managed_schema_variant=good
 ```
 
-Expected: succeeds because the new field has a default.
+Expected:
+
+- `terraform apply` succeeds.
+- The consumer (already upgraded in step 5.1) can read both old (v1) and new (v2) records.
 
 ### 5.4 Schema compatibility checks (Schema Registry)
 
