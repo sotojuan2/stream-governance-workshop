@@ -215,3 +215,15 @@ terraform -chdir=terraform/03-SR destroy
 terraform -chdir=terraform/02-application destroy
 terraform -chdir=terraform/01-platform destroy
 ```
+
+## Acknowledgments
+
+This workshop has benefited from the excellent work of the Confluent community. Special thanks to:
+
+- **Tomas Almeida** (CSTA Team) for his comprehensive repository on [Confluent Data Contracts](https://github.com/tomasalmeida/confluent-data-contract), which not only covers the data contract concepts demonstrated in this workshop but also explains in depth migration rules, advanced patterns, and best practices.
+
+## Related Resources
+
+If you found this Stream Governance workshop useful, we recommend exploring these related repositories:
+
+- **[Client-Side Field Level Encryption (CSFLE)](https://github.com/pneff93/csfle)** by Patrick Neff - Practical implementation of client-side field-level encryption for Kafka, an essential complementary technique for governing sensitive data in streaming environments.
