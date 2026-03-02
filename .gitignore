@@ -18,6 +18,10 @@
 /terraform/.env
 /terraform/client.properties
 
+# Instructor-only documentation (not for workshop attendees)
+INSTRUCTOR_GUIDE.md
+INSTRUCTOR_GUIDE.md.bak
+
 # OS / tooling
 .DS_Store
 .dotfiles.update
